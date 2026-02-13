@@ -53,7 +53,8 @@ function tokenEnvForProjectId(id: string) {
 
 function randToken() {
   // URL-safe, good enough for bearer in MVP.
-  return sh("python3 -c 'import secrets; print(secrets.token_urlsafe(32))'").trim();
+  // Avoid python dependency inside container.
+  return sh("node -e 'console.log(require(\"crypto\").randomBytes(32).toString(\"base64url\"))'").trim();
 }
 
 app.get("/health", async () => ({ ok: true }));
