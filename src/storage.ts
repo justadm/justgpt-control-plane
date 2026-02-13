@@ -15,6 +15,7 @@ export type Project = {
   nginxChanged: boolean | null;
   // Для MVP храним JSON inline (может быть большим); позже вынесем в отдельное хранилище.
   jsonInline: string | null;
+  jsonUrl: string | null;
 };
 
 export type Db = {
@@ -63,6 +64,7 @@ export function upsertProject(
     existing.mcpPath = p.mcpPath;
     existing.tokenEnv = p.tokenEnv;
     existing.jsonInline = (p as any).jsonInline ?? existing.jsonInline ?? null;
+    existing.jsonUrl = (p as any).jsonUrl ?? existing.jsonUrl ?? null;
     saveDb(filePath, db);
     return existing;
   }
@@ -75,6 +77,7 @@ export function upsertProject(
     hostPort: null,
     nginxChanged: null,
     jsonInline: (p as any).jsonInline ?? null,
+    jsonUrl: (p as any).jsonUrl ?? null,
   };
   db.projects.push(created);
   saveDb(filePath, db);

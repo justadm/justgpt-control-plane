@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import Fastify from "fastify";
 import { z } from "zod";
@@ -15,6 +16,8 @@ const Env = z.object({
 const env = Env.parse(process.env);
 
 const app = Fastify({ logger: true });
+
+const JSON_MAX_BYTES = 2_000_000; // MVP лимит на размер JSON файла
 
 function sh(cmd: string) {
   // We rely on docker CLI for host operations.
@@ -129,6 +132,34 @@ function ensureMcpNginxRoute(mcpPath: string, hostPort: number) {
   return true;
 }
 
+async function fetchJsonText(url: string, headers: Record<string, string>) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const r = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    if (r.status === 304) return { status: 304, text: null as string | null, headers: r.headers };
+    if (!r.ok) return { status: r.status, text: null as string | null, headers: r.headers };
+
+    const ab = await r.arrayBuffer();
+    if (ab.byteLength > JSON_MAX_BYTES) {
+      throw new Error(`json too large: ${ab.byteLength} bytes (max ${JSON_MAX_BYTES})`);
+    }
+    const text = Buffer.from(ab).toString("utf8");
+    return { status: 200, text, headers: r.headers };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sha256Hex(s: string) {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+
 app.get("/health", async () => ({ ok: true }));
 
 app.post("/deploy", async (req, reply) => {
@@ -139,6 +170,7 @@ app.post("/deploy", async (req, reply) => {
     type: z.enum(["json", "openapi", "postgres", "mysql"]),
     mcpPath: z.string().min(1).optional(),
     jsonInline: z.string().nullable().optional(),
+    jsonUrl: z.string().nullable().optional(),
   });
   const body = Body.parse(req.body);
 
@@ -157,28 +189,120 @@ app.post("/deploy", async (req, reply) => {
   host("git pull --ff-only");
 
   // For json projects, write managed data file under deploy/data/<id>.json (host path).
-  let jsonHostFile: string | null = null;
-  if (body.type === "json" && body.jsonInline && body.jsonInline.trim()) {
-    // Validate JSON and canonicalize.
-    let parsed: any;
-    try {
-      parsed = JSON.parse(body.jsonInline);
-    } catch {
-      reply.code(400);
-      return { error: "bad jsonInline (must be valid JSON)" };
+  const jsonHostFile = `data/${id}.json`; // relative to deploy/ for compose
+  const jsonAbsDir = `${env.MCP_REPO_DIR}/deploy/data`;
+  const jsonAbsFile = `${jsonAbsDir}/${id}.json`;
+  const jsonAbsMeta = `${jsonAbsDir}/${id}.source.json`;
+
+  if (body.type === "json") {
+    asRoot(`mkdir -p ${jsonAbsDir}`);
+
+    // Priority: jsonUrl, then jsonInline, else keep existing (or create empty {}).
+    if (body.jsonUrl && body.jsonUrl.trim()) {
+      let u: URL;
+      try {
+        u = new URL(body.jsonUrl.trim());
+      } catch {
+        reply.code(400);
+        return { error: "bad jsonUrl" };
+      }
+      if (u.protocol !== "https:" && u.protocol !== "http:") {
+        reply.code(400);
+        return { error: "jsonUrl must be http(s)" };
+      }
+
+      let meta: any = null;
+      if (fs.existsSync(jsonAbsMeta)) {
+        try {
+          meta = JSON.parse(fs.readFileSync(jsonAbsMeta, "utf8"));
+        } catch {
+          meta = null;
+        }
+      }
+
+      const hdrs: Record<string, string> = {
+        accept: "application/json",
+        "user-agent": "justgpt-control-plane/0.1.0",
+      };
+      if (meta && meta.url === u.toString()) {
+        if (meta.etag) hdrs["if-none-match"] = String(meta.etag);
+        if (meta.lastModified) hdrs["if-modified-since"] = String(meta.lastModified);
+      }
+
+      const fr = await fetchJsonText(u.toString(), hdrs);
+      if (fr.status === 304 && fs.existsSync(jsonAbsFile)) {
+        // cache hit
+        const m2 = {
+          ...(meta || {}),
+          url: u.toString(),
+          fetchedAt: new Date().toISOString(),
+          status: 304,
+        };
+        fs.writeFileSync(jsonAbsMeta, JSON.stringify(m2, null, 2) + "\n");
+      } else if (fr.status === 200 && fr.text !== null) {
+        let parsed: any;
+        try {
+          parsed = JSON.parse(fr.text);
+        } catch {
+          reply.code(400);
+          return { error: "jsonUrl did not return valid JSON" };
+        }
+        const out = JSON.stringify(parsed, null, 2) + "\n";
+        fs.writeFileSync(jsonAbsFile, out);
+        const m2 = {
+          url: u.toString(),
+          fetchedAt: new Date().toISOString(),
+          status: 200,
+          bytes: Buffer.byteLength(out, "utf8"),
+          sha256: sha256Hex(out),
+          etag: fr.headers.get("etag"),
+          lastModified: fr.headers.get("last-modified"),
+        };
+        fs.writeFileSync(jsonAbsMeta, JSON.stringify(m2, null, 2) + "\n");
+      } else {
+        reply.code(502);
+        return { error: `jsonUrl fetch failed: status ${fr.status}` };
+      }
+    } else if (body.jsonInline && body.jsonInline.trim()) {
+      let parsed: any;
+      try {
+        parsed = JSON.parse(body.jsonInline);
+      } catch {
+        reply.code(400);
+        return { error: "bad jsonInline (must be valid JSON)" };
+      }
+      const out = JSON.stringify(parsed, null, 2) + "\n";
+      if (Buffer.byteLength(out, "utf8") > JSON_MAX_BYTES) {
+        reply.code(413);
+        return { error: `json too large (max ${JSON_MAX_BYTES})` };
+      }
+      fs.writeFileSync(jsonAbsFile, out);
+      const m2 = {
+        url: null,
+        fetchedAt: new Date().toISOString(),
+        status: 200,
+        bytes: Buffer.byteLength(out, "utf8"),
+        sha256: sha256Hex(out),
+        source: "inline",
+      };
+      fs.writeFileSync(jsonAbsMeta, JSON.stringify(m2, null, 2) + "\n");
+    } else if (!fs.existsSync(jsonAbsFile)) {
+      fs.writeFileSync(jsonAbsFile, "{}\n");
+      const m2 = {
+        url: null,
+        fetchedAt: new Date().toISOString(),
+        status: 200,
+        bytes: 3,
+        sha256: sha256Hex("{}\n"),
+        source: "empty",
+      };
+      fs.writeFileSync(jsonAbsMeta, JSON.stringify(m2, null, 2) + "\n");
     }
-    const out = JSON.stringify(parsed, null, 2) + "\n";
-    const rel = `deploy/data/${id}.json`;
-    const abs = `${env.MCP_REPO_DIR}/${rel}`;
-    asRoot(`mkdir -p ${env.MCP_REPO_DIR}/deploy/data`);
-    fs.writeFileSync(abs, out);
-    jsonHostFile = `data/${id}.json`; // relative to deploy/ for compose
   }
 
   // Generate project files via mcp-service init only if missing (idempotent deploy).
   if (!fs.existsSync(files.project) || !fs.existsSync(files.compose)) {
-    const jsonArg =
-      body.type === "json" && jsonHostFile ? ` --json-file ./${jsonHostFile}` : "";
+    const jsonArg = body.type === "json" ? ` --json-file ./${jsonHostFile}` : "";
     host(
       `npm install --silent >/dev/null 2>&1 || true; ` +
         `npm run build >/dev/null 2>&1; ` +

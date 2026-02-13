@@ -55,7 +55,11 @@
           <div id="jsonBox" style="display:none;">
             <label>JSON (inline, для MVP)</label>
             <textarea id="jsonInline" rows="10" placeholder='например: { "hello": "world" }' style="width:100%; padding:10px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.25); color: var(--text); outline:none; resize: vertical;"></textarea>
-            <div class="hint" style="margin-top:6px;">Этот JSON будет сохранен и задеплоен как источник данных проекта.</div>
+            <label style="margin-top:10px;">JSON URL (опционально)</label>
+            <input id="jsonUrl" placeholder="https://example.com/data.json" />
+            <div class="hint" style="margin-top:6px;">
+              Если задан URL, при деплое agent загрузит JSON и закеширует его. Иначе используем inline JSON.
+            </div>
           </div>
           <label>MCP path (опционально)</label>
           <input id="mcpPath" placeholder="/p/myproj/mcp" />
@@ -220,6 +224,7 @@
         const type = document.getElementById('type').value;
         const mcpPath = document.getElementById('mcpPath').value;
         const jsonInline = document.getElementById('jsonInline').value;
+        const jsonUrl = document.getElementById('jsonUrl').value;
         const out = document.getElementById('out');
         out.textContent = '...';
         showTokenOnce(null);
@@ -232,6 +237,7 @@
               type,
               mcpPath: mcpPath || undefined,
               jsonInline: (type === 'json' && jsonInline.trim()) ? jsonInline : undefined,
+              jsonUrl: (type === 'json' && jsonUrl.trim()) ? jsonUrl.trim() : undefined,
             })
           });
           out.textContent = JSON.stringify(redactSecrets(res), null, 2);

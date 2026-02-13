@@ -48,7 +48,17 @@ app.get("/api/projects", async () => {
   const db = loadDb(env.DATA_FILE);
   return {
     projects: db.projects.map((p) => ({
-      ...p,
+      // не возвращаем jsonInline (может быть большим/чувствительным) в список
+      id: p.id,
+      type: p.type,
+      mcpPath: p.mcpPath,
+      tokenEnv: p.tokenEnv,
+      createdAt: p.createdAt,
+      status: p.status,
+      lastDeployAt: p.lastDeployAt,
+      hostPort: (p as any).hostPort ?? null,
+      nginxChanged: (p as any).nginxChanged ?? null,
+      jsonUrl: (p as any).jsonUrl ?? null,
       endpoint: `${env.MCP_BASE_URL}${p.mcpPath}`,
     })),
   };
@@ -59,7 +69,8 @@ app.post("/api/projects", async (req, reply) => {
     id: z.string().min(1),
     type: ProjectType,
     mcpPath: z.string().min(1).optional(),
-    jsonInline: z.string().min(1).optional(),
+    jsonInline: z.string().min(1).max(1_000_000).optional(),
+    jsonUrl: z.string().min(1).max(2000).optional(),
   });
   const body = Body.parse(req.body);
 
@@ -68,7 +79,13 @@ app.post("/api/projects", async (req, reply) => {
   const mcpPath = body.mcpPath?.trim() || `/p/${id}/mcp`;
 
   let jsonInline: string | undefined;
-  if (body.type === "json" && body.jsonInline?.trim()) {
+  let jsonUrl: string | undefined;
+  if (body.type === "json" && body.jsonUrl?.trim()) {
+    const u = new URL(body.jsonUrl.trim());
+    if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("jsonUrl должен быть http(s)");
+    jsonUrl = u.toString();
+  }
+  if (!jsonUrl && body.type === "json" && body.jsonInline?.trim()) {
     // Канонизируем: валидируем JSON и сохраняем компактно.
     const parsed = JSON.parse(body.jsonInline);
     jsonInline = JSON.stringify(parsed, null, 2);
@@ -80,6 +97,7 @@ app.post("/api/projects", async (req, reply) => {
     mcpPath,
     tokenEnv,
     jsonInline: jsonInline ?? null,
+    jsonUrl: jsonUrl ?? null,
   });
 
   reply.code(201);
@@ -119,7 +137,8 @@ app.post("/api/projects/:id/deploy", async (req, reply) => {
       id: p0.id,
       type: p0.type,
       mcpPath: p0.mcpPath,
-      jsonInline: p0.jsonInline,
+      jsonInline: (p0 as any).jsonInline ?? null,
+      jsonUrl: (p0 as any).jsonUrl ?? null,
     }),
   });
 
