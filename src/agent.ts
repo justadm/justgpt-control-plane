@@ -90,7 +90,7 @@ function host(cmd: string) {
 function readHostPortFromCompose(projectId: string) {
   const composeFile = `${env.MCP_REPO_DIR}/deploy/docker-compose.nginx.${projectId}.yml`;
   const raw = fs.readFileSync(composeFile, "utf8");
-  const m = raw.match(/127\\.0\\.0\\.1:(19\\d{3}):8080/);
+  const m = raw.match(/127\.0\.0\.1:(19\d{3}):8080/);
   if (!m) throw new Error(`cannot find host port mapping in ${composeFile}`);
   return Number(m[1]);
 }
