@@ -17,6 +17,7 @@ const env = Env.parse(process.env);
 const app = Fastify({ logger: true });
 
 function sh(cmd: string) {
+  // We rely on docker CLI for host operations.
   return execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
@@ -63,6 +64,15 @@ function asRoot(cmd: string) {
   return sh(cmd);
 }
 
+function host(cmd: string) {
+  // Execute on host via an ephemeral alpine container (no need for git/npm inside agent image).
+  // env.MCP_REPO_DIR is bind-mounted into the agent container, so it is accessible here too.
+  const q = cmd.replaceAll("'", "'\"'\"'");
+  return sh(
+    `docker run --rm -v ${env.MCP_REPO_DIR}:${env.MCP_REPO_DIR} -w ${env.MCP_REPO_DIR} alpine:3.20 sh -lc '${q}'`,
+  );
+}
+
 app.get("/health", async () => ({ ok: true }));
 
 app.post("/deploy", async (req, reply) => {
@@ -86,13 +96,16 @@ app.post("/deploy", async (req, reply) => {
   const tokenEnv = tokenEnvForProjectId(id);
   const token = randToken();
 
-  // Pull latest mcp-service repo.
-  asRoot(`cd ${env.MCP_REPO_DIR} && git pull --ff-only`);
+  // Pull latest mcp-service repo (host).
+  host("git pull --ff-only");
 
   // Generate project files via mcp-service init. We do not auto-patch nginx template in repo.
   // Nginx routing on VM is handled separately by manual template sync today.
-  sh(
-    `cd ${env.MCP_REPO_DIR} && npm install --silent >/dev/null 2>&1 || true; npm run build >/dev/null 2>&1; ` +
+  // Generate project files via mcp-service init (host).
+  // Node/npm/tsc must exist on the host in this MVP flow.
+  host(
+    `npm install --silent >/dev/null 2>&1 || true; ` +
+      `npm run build >/dev/null 2>&1; ` +
       `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
   );
 
