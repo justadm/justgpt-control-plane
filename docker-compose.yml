@@ -7,8 +7,7 @@ services:
       DATA_FILE: /data/projects.json
       MCP_BASE_URL: https://mcp.justgpt.ru
       AGENT_URL: http://host.docker.internal:19101
-      # AGENT_TOKEN: set on VM via env file / runtime override
-      # (do not commit real token)
+      AGENT_TOKEN: ${AGENT_TOKEN}
     volumes:
       - control_plane_data:/data
     extra_hosts:
