@@ -6,10 +6,35 @@ services:
       HOST: 0.0.0.0
       DATA_FILE: /data/projects.json
       MCP_BASE_URL: https://mcp.justgpt.ru
+      AGENT_URL: http://host.docker.internal:19101
+      # AGENT_TOKEN: set on VM via env file / runtime override
+      # (do not commit real token)
     volumes:
       - control_plane_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:19100:3000"
+    restart: unless-stopped
+
+  deploy_agent:
+    build: .
+    command: ["node", "dist/agent.js"]
+    environment:
+      PORT: 19101
+      HOST: 0.0.0.0
+      # TOKEN: set on VM via env file / runtime override (required)
+      MCP_REPO_DIR: /opt/justgpt-mcp-service
+      NGINX_SITE: /etc/nginx/sites-available/justgpt.ru.https
+      MCP_ENV_FILE: /opt/justgpt-mcp-service/deploy/.env
+    volumes:
+      - /opt/justgpt-mcp-service:/opt/justgpt-mcp-service
+      - /etc/nginx:/etc/nginx
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:19101:19101"
     restart: unless-stopped
 
 volumes:

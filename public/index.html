@@ -30,7 +30,7 @@
   <body>
     <div class="wrap">
       <h1>JustGPT Control Plane</h1>
-      <p class="sub">MVP UI: создать проект (метаданные), получить endpoint и tokenEnv. Автодеплой будет следующим шагом.</p>
+      <p class="sub">MVP UI: проекты + автодеплой на VM через локальный agent (docker/nginx).</p>
 
       <div class="grid">
         <div class="card">
@@ -84,6 +84,9 @@
         const el = document.getElementById('list');
         el.innerHTML = projects.map((p) => {
           const pill = p.status === 'deployed' ? 'ok' : 'warn';
+          const deployBtn = p.status === 'deployed'
+            ? '<button disabled style="opacity:0.5; cursor: default;">Deployed</button>'
+            : `<button data-deploy="${esc(p.id)}">Deploy</button>`;
           return `
             <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.08)">
               <div class="row">
@@ -93,9 +96,27 @@
               <div style="color: var(--muted); font-size: 12px; margin-top: 6px;">
                 path: <code>${esc(p.mcpPath)}</code> | tokenEnv: <code>${esc(p.tokenEnv)}</code>
               </div>
+              <div style="margin-top:10px;">
+                ${deployBtn}
+              </div>
             </div>
           `;
         }).join('') || '<p class="sub">Пока нет проектов.</p>';
+
+        for (const btn of el.querySelectorAll('button[data-deploy]')) {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-deploy');
+            const out = document.getElementById('out');
+            out.textContent = 'deploy...';
+            try {
+              const res = await j(`/api/projects/${id}/deploy`, { method: 'POST' });
+              out.textContent = JSON.stringify(res, null, 2);
+              await refresh();
+            } catch (e) {
+              out.textContent = String(e);
+            }
+          });
+        }
       }
 
       document.getElementById('create').addEventListener('click', async () => {

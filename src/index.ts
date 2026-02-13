@@ -10,6 +10,8 @@ const Env = z.object({
   HOST: z.string().min(1).default("0.0.0.0"),
   DATA_FILE: z.string().min(1).default("data/projects.json"),
   MCP_BASE_URL: z.string().min(1).default("https://mcp.justgpt.ru"),
+  AGENT_URL: z.string().min(1).default("http://host.docker.internal:19101"),
+  AGENT_TOKEN: z.string().min(1).optional(),
 });
 
 const env = Env.parse(process.env);
@@ -62,15 +64,50 @@ app.post("/api/projects", async (req, reply) => {
 app.post("/api/projects/:id/deploy", async (req, reply) => {
   const id = validateProjectId(String((req.params as any).id || ""));
 
-  // MVP: автодеплой выключен. На этом шаге просто отмечаем deployed для UI.
-  // Следующий шаг: реально дергать mcp-service init и docker/nginx на VM.
+  const db = loadDb(env.DATA_FILE);
+  const p0 = db.projects.find((x) => x.id === id);
+  if (!p0) {
+    reply.code(404);
+    return { error: "project not found" };
+  }
+
+  if (!env.AGENT_TOKEN) {
+    reply.code(503);
+    return { error: "agent is not configured (AGENT_TOKEN is missing)" };
+  }
+
+  const r = await fetch(`${env.AGENT_URL}/deploy`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-agent-token": env.AGENT_TOKEN,
+    },
+    body: JSON.stringify({
+      id: p0.id,
+      type: p0.type,
+      mcpPath: p0.mcpPath,
+    }),
+  });
+
+  const text = await r.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+  if (!r.ok) {
+    reply.code(502);
+    return { error: "deploy failed", agent: data };
+  }
+
   const p = markDeployed(env.DATA_FILE, id);
   if (!p) {
     reply.code(404);
     return { error: "project not found" };
   }
 
-  return { ok: true, project: p, note: "Автодеплой еще не реализован (MVP control-plane)" };
+  return { ok: true, project: p, agent: data };
 });
 
 app.listen({ port: env.PORT, host: env.HOST });
