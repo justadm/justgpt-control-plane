@@ -20,6 +20,7 @@ services:
     build: .
     command: ["node", "dist/agent.js"]
     pid: host
+    privileged: true
     environment:
       PORT: 19101
       HOST: 0.0.0.0
