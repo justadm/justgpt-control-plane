@@ -10,7 +10,8 @@ RUN npm run build
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apk add --no-cache docker-cli nginx ca-certificates
+# docker-cli-compose provides `docker compose ...`
+RUN apk add --no-cache docker-cli docker-cli-compose nginx ca-certificates
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
