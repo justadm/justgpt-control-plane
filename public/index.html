@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JustGPT Control Plane</title>
+    <style>
+      :root { --bg: #0c0f14; --card: #151a23; --text: #e8eefc; --muted: #9aa6c0; --accent: #62d6ff; --danger: #ff6b6b; }
+      html, body { height: 100%; }
+      body { margin: 0; font: 16px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: radial-gradient(1200px 600px at 20% 10%, #1a2140 0%, transparent 60%), radial-gradient(900px 500px at 85% 30%, #12333e 0%, transparent 55%), var(--bg); color: var(--text); }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 28px 18px 60px; }
+      h1 { margin: 0 0 12px; letter-spacing: 0.5px; }
+      .sub { color: var(--muted); margin: 0 0 22px; }
+      .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+      @media (min-width: 900px) { .grid { grid-template-columns: 380px 1fr; } }
+      .card { background: color-mix(in srgb, var(--card) 85%, transparent); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
+      label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 6px; }
+      input, select { width: 100%; padding: 10px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.25); color: var(--text); outline: none; }
+      button { margin-top: 12px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); background: linear-gradient(135deg, rgba(98,214,255,0.18), rgba(98,214,255,0.06)); color: var(--text); cursor: pointer; }
+      button:hover { border-color: rgba(98,214,255,0.55); }
+      .row { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+      .pill { font-size: 12px; padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); color: var(--muted); }
+      .pill.ok { border-color: rgba(98,214,255,0.5); color: var(--accent); }
+      .pill.warn { border-color: rgba(255,107,107,0.5); color: var(--danger); }
+      pre { margin: 10px 0 0; padding: 12px; border-radius: 12px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); overflow: auto; }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>JustGPT Control Plane</h1>
+      <p class="sub">MVP UI: создать проект (метаданные), получить endpoint и tokenEnv. Автодеплой будет следующим шагом.</p>
+
+      <div class="grid">
+        <div class="card">
+          <div class="row">
+            <strong>Новый проект</strong>
+            <span class="pill warn">MVP</span>
+          </div>
+          <label>Project ID</label>
+          <input id="id" placeholder="например: myproj" />
+          <label>Type</label>
+          <select id="type">
+            <option value="json">json</option>
+            <option value="openapi">openapi</option>
+            <option value="mysql">mysql</option>
+            <option value="postgres">postgres</option>
+          </select>
+          <label>MCP path (опционально)</label>
+          <input id="mcpPath" placeholder="/p/myproj/mcp" />
+          <button id="create">Create</button>
+          <pre id="out">...</pre>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <strong>Проекты</strong>
+            <span class="pill" id="count">0</span>
+          </div>
+          <div id="list"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      async function j(url, opts) {
+        const r = await fetch(url, opts);
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); } catch { data = { raw: text }; }
+        if (!r.ok) throw new Error((data && (data.error || data.message)) || ("HTTP " + r.status));
+        return data;
+      }
+
+      function esc(s) {
+        return String(s).replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      }
+
+      async function refresh() {
+        const data = await j('/api/projects');
+        const projects = data.projects || [];
+        document.getElementById('count').textContent = String(projects.length);
+        const el = document.getElementById('list');
+        el.innerHTML = projects.map((p) => {
+          const pill = p.status === 'deployed' ? 'ok' : 'warn';
+          return `
+            <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.08)">
+              <div class="row">
+                <div><strong>${esc(p.id)}</strong> <span class="pill">${esc(p.type)}</span></div>
+                <span class="pill ${pill}">${esc(p.status)}</span>
+              </div>
+              <div style="color: var(--muted); font-size: 12px; margin-top: 6px;">
+                path: <code>${esc(p.mcpPath)}</code> | tokenEnv: <code>${esc(p.tokenEnv)}</code>
+              </div>
+            </div>
+          `;
+        }).join('') || '<p class="sub">Пока нет проектов.</p>';
+      }
+
+      document.getElementById('create').addEventListener('click', async () => {
+        const id = document.getElementById('id').value;
+        const type = document.getElementById('type').value;
+        const mcpPath = document.getElementById('mcpPath').value;
+        const out = document.getElementById('out');
+        out.textContent = '...';
+        try {
+          const res = await j('/api/projects', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id, type, mcpPath: mcpPath || undefined })
+          });
+          out.textContent = JSON.stringify(res, null, 2);
+          await refresh();
+        } catch (e) {
+          out.textContent = String(e);
+        }
+      });
+
+      refresh().catch(() => {});
+    </script>
+  </body>
+</html>
