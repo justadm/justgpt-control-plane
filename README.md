@@ -22,3 +22,17 @@ npm run dev
 - `HOST` (default: 0.0.0.0)
 - `DATA_FILE` (default: data/projects.json)
 - `MCP_BASE_URL` (default: https://mcp.justgpt.ru)
+
+## Деплой на VM (nginx reverse proxy)
+
+Пример: поднять контейнер локально на VM и проксировать домены `app.justgpt.ru` и `api.justgpt.ru` на `127.0.0.1:19100`.
+
+На VM:
+```bash
+git pull
+docker compose up -d --build
+```
+
+Nginx (идея):
+- `app.justgpt.ru` -> proxy -> `http://127.0.0.1:19100/`
+- `api.justgpt.ru` -> proxy -> `http://127.0.0.1:19100/api/...`

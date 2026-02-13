@@ -1,0 +1,16 @@
+services:
+  control_plane:
+    build: .
+    environment:
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATA_FILE: /data/projects.json
+      MCP_BASE_URL: https://mcp.justgpt.ru
+    volumes:
+      - control_plane_data:/data
+    ports:
+      - "127.0.0.1:19100:3000"
+    restart: unless-stopped
+
+volumes:
+  control_plane_data:
