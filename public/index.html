@@ -52,6 +52,11 @@
             <option value="mysql">mysql</option>
             <option value="postgres">postgres</option>
           </select>
+          <div id="jsonBox" style="display:none;">
+            <label>JSON (inline, для MVP)</label>
+            <textarea id="jsonInline" rows="10" placeholder='например: { "hello": "world" }' style="width:100%; padding:10px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.25); color: var(--text); outline:none; resize: vertical;"></textarea>
+            <div class="hint" style="margin-top:6px;">Этот JSON будет сохранен и задеплоен как источник данных проекта.</div>
+          </div>
           <label>MCP path (опционально)</label>
           <input id="mcpPath" placeholder="/p/myproj/mcp" />
           <button id="create">Create</button>
@@ -214,6 +219,7 @@
         const id = document.getElementById('id').value;
         const type = document.getElementById('type').value;
         const mcpPath = document.getElementById('mcpPath').value;
+        const jsonInline = document.getElementById('jsonInline').value;
         const out = document.getElementById('out');
         out.textContent = '...';
         showTokenOnce(null);
@@ -221,7 +227,12 @@
           const res = await j('/api/projects', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ id, type, mcpPath: mcpPath || undefined })
+            body: JSON.stringify({
+              id,
+              type,
+              mcpPath: mcpPath || undefined,
+              jsonInline: (type === 'json' && jsonInline.trim()) ? jsonInline : undefined,
+            })
           });
           out.textContent = JSON.stringify(redactSecrets(res), null, 2);
           await refresh();
@@ -229,6 +240,13 @@
           out.textContent = String(e);
         }
       });
+
+      function syncJsonUi() {
+        const type = document.getElementById('type').value;
+        document.getElementById('jsonBox').style.display = (type === 'json') ? 'block' : 'none';
+      }
+      document.getElementById('type').addEventListener('change', syncJsonUi);
+      syncJsonUi();
 
       document.getElementById('copyToken').addEventListener('click', async () => {
         const text = document.getElementById('tokenValue').textContent || '';

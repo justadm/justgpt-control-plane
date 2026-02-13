@@ -138,6 +138,7 @@ app.post("/deploy", async (req, reply) => {
     id: z.string().min(1),
     type: z.enum(["json", "openapi", "postgres", "mysql"]),
     mcpPath: z.string().min(1).optional(),
+    jsonInline: z.string().nullable().optional(),
   });
   const body = Body.parse(req.body);
 
@@ -155,12 +156,33 @@ app.post("/deploy", async (req, reply) => {
   // Pull latest mcp-service repo (host).
   host("git pull --ff-only");
 
+  // For json projects, write managed data file under deploy/data/<id>.json (host path).
+  let jsonHostFile: string | null = null;
+  if (body.type === "json" && body.jsonInline && body.jsonInline.trim()) {
+    // Validate JSON and canonicalize.
+    let parsed: any;
+    try {
+      parsed = JSON.parse(body.jsonInline);
+    } catch {
+      reply.code(400);
+      return { error: "bad jsonInline (must be valid JSON)" };
+    }
+    const out = JSON.stringify(parsed, null, 2) + "\n";
+    const rel = `deploy/data/${id}.json`;
+    const abs = `${env.MCP_REPO_DIR}/${rel}`;
+    asRoot(`mkdir -p ${env.MCP_REPO_DIR}/deploy/data`);
+    fs.writeFileSync(abs, out);
+    jsonHostFile = `data/${id}.json`; // relative to deploy/ for compose
+  }
+
   // Generate project files via mcp-service init only if missing (idempotent deploy).
   if (!fs.existsSync(files.project) || !fs.existsSync(files.compose)) {
+    const jsonArg =
+      body.type === "json" && jsonHostFile ? ` --json-file ./${jsonHostFile}` : "";
     host(
       `npm install --silent >/dev/null 2>&1 || true; ` +
         `npm run build >/dev/null 2>&1; ` +
-        `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
+        `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath}${jsonArg} --no-update-env-example --no-update-nginx`,
     );
   }
   if (!fs.existsSync(files.project) || !fs.existsSync(files.compose)) {

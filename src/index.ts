@@ -59,6 +59,7 @@ app.post("/api/projects", async (req, reply) => {
     id: z.string().min(1),
     type: ProjectType,
     mcpPath: z.string().min(1).optional(),
+    jsonInline: z.string().min(1).optional(),
   });
   const body = Body.parse(req.body);
 
@@ -66,11 +67,19 @@ app.post("/api/projects", async (req, reply) => {
   const tokenEnv = tokenEnvForProjectId(id);
   const mcpPath = body.mcpPath?.trim() || `/p/${id}/mcp`;
 
+  let jsonInline: string | undefined;
+  if (body.type === "json" && body.jsonInline?.trim()) {
+    // Канонизируем: валидируем JSON и сохраняем компактно.
+    const parsed = JSON.parse(body.jsonInline);
+    jsonInline = JSON.stringify(parsed, null, 2);
+  }
+
   const p = upsertProject(env.DATA_FILE, {
     id,
     type: body.type,
     mcpPath,
     tokenEnv,
+    jsonInline: jsonInline ?? null,
   });
 
   reply.code(201);
@@ -110,6 +119,7 @@ app.post("/api/projects/:id/deploy", async (req, reply) => {
       id: p0.id,
       type: p0.type,
       mcpPath: p0.mcpPath,
+      jsonInline: p0.jsonInline,
     }),
   });
 
