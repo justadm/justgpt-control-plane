@@ -25,6 +25,11 @@
       pre { margin: 10px 0 0; padding: 12px; border-radius: 12px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); overflow: auto; }
       a { color: var(--accent); text-decoration: none; }
       a:hover { text-decoration: underline; }
+      .hint { font-size: 12px; color: var(--muted); }
+      .tokenbox { margin-top: 10px; padding: 10px; border-radius: 12px; background: rgba(0,0,0,0.25); border: 1px dashed rgba(98,214,255,0.35); }
+      .tokenrow { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+      .copy { width: auto; margin: 0; padding: 8px 10px; }
+      .smallbtn { width: auto; margin: 0; padding: 8px 10px; }
     </style>
   </head>
   <body>
@@ -50,6 +55,16 @@
           <label>MCP path (опционально)</label>
           <input id="mcpPath" placeholder="/p/myproj/mcp" />
           <button id="create">Create</button>
+          <div id="tokenBox" class="tokenbox" style="display:none;">
+            <div class="tokenrow">
+              <div>
+                <div><strong>Project token</strong></div>
+                <div class="hint">Показывается один раз. Сохрани сейчас.</div>
+              </div>
+              <button id="copyToken" class="copy">Copy</button>
+            </div>
+            <pre id="tokenValue" style="margin-top:10px;"></pre>
+          </div>
           <pre id="out">...</pre>
         </div>
 
@@ -71,6 +86,29 @@
         try { data = JSON.parse(text); } catch { data = { raw: text }; }
         if (!r.ok) throw new Error((data && (data.error || data.message)) || ("HTTP " + r.status));
         return data;
+      }
+
+      function showTokenOnce(res) {
+        const token = res && res.agent && res.agent.token;
+        const tokenEnv = res && res.agent && res.agent.tokenEnv;
+        const box = document.getElementById('tokenBox');
+        const val = document.getElementById('tokenValue');
+        if (token && tokenEnv) {
+          val.textContent = `${tokenEnv}=${token}`;
+          box.style.display = 'block';
+        } else {
+          box.style.display = 'none';
+          val.textContent = '';
+        }
+      }
+
+      async function copyToClipboard(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch {
+          return false;
+        }
       }
 
       function esc(s) {
@@ -113,6 +151,7 @@
             const id = btn.getAttribute('data-deploy');
             const out = document.getElementById('out');
             out.textContent = 'deploy...';
+            showTokenOnce(null);
             btn.disabled = true;
             btn.style.opacity = '0.7';
             try {
@@ -122,6 +161,7 @@
                 body: '{}',
               });
               out.textContent = JSON.stringify(res, null, 2);
+              showTokenOnce(res);
               await refresh();
             } catch (e) {
               out.textContent = String(e);
@@ -133,12 +173,36 @@
         }
       }
 
+      let refreshTimer = null;
+      let refreshBackoffMs = 2000;
+      function startAutoRefresh() {
+        stopAutoRefresh();
+        refreshBackoffMs = 2000;
+        const tick = async () => {
+          try {
+            await refresh();
+            refreshBackoffMs = 2000;
+          } catch {
+            // если что-то временно отвалилось, не долбим слишком часто
+            refreshBackoffMs = Math.min(15000, Math.floor(refreshBackoffMs * 1.5));
+          } finally {
+            refreshTimer = setTimeout(tick, refreshBackoffMs);
+          }
+        };
+        refreshTimer = setTimeout(tick, refreshBackoffMs);
+      }
+      function stopAutoRefresh() {
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = null;
+      }
+
       document.getElementById('create').addEventListener('click', async () => {
         const id = document.getElementById('id').value;
         const type = document.getElementById('type').value;
         const mcpPath = document.getElementById('mcpPath').value;
         const out = document.getElementById('out');
         out.textContent = '...';
+        showTokenOnce(null);
         try {
           const res = await j('/api/projects', {
             method: 'POST',
@@ -152,7 +216,18 @@
         }
       });
 
+      document.getElementById('copyToken').addEventListener('click', async () => {
+        const text = document.getElementById('tokenValue').textContent || '';
+        if (!text.trim()) return;
+        const ok = await copyToClipboard(text);
+        const btn = document.getElementById('copyToken');
+        const prev = btn.textContent;
+        btn.textContent = ok ? 'Copied' : 'Copy failed';
+        setTimeout(() => { btn.textContent = prev; }, 1200);
+      });
+
       refresh().catch(() => {});
+      startAutoRefresh();
     </script>
   </body>
 </html>
