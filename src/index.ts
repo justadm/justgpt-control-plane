@@ -20,7 +20,13 @@ const app = Fastify({ logger: true });
 
 // Fastify по умолчанию кидает FST_ERR_CTP_EMPTY_JSON_BODY если content-type=application/json и body пустое.
 // Для MVP удобнее принимать пустое тело как {} (это безопасно для наших эндпоинтов).
-app.addContentTypeParser(/^application\/json(;.*)?$/, { parseAs: "string" }, (_req, body, done) => {
+try {
+  // default parser мешает переопределению; снимаем и ставим свой.
+  (app as any).removeContentTypeParser?.("application/json");
+} catch {
+  // ignore
+}
+app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
   const s = String(body ?? "").trim();
   if (!s) return done(null, {});
   try {
