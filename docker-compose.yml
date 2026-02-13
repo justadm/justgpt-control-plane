@@ -6,7 +6,7 @@ services:
       HOST: 0.0.0.0
       DATA_FILE: /data/projects.json
       MCP_BASE_URL: https://mcp.justgpt.ru
-      AGENT_URL: http://host.docker.internal:19101
+      AGENT_URL: http://deploy_agent:19101
       AGENT_TOKEN: ${AGENT_TOKEN}
     volumes:
       - control_plane_data:/data
