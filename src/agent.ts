@@ -48,6 +48,17 @@ function ensureEnvLine(file: string, key: string, value: string) {
   fs.writeFileSync(file, out.join("\n") + "\n");
 }
 
+function readEnvValue(file: string, key: string) {
+  if (!fs.existsSync(file)) return null;
+  const raw = fs.readFileSync(file, "utf8");
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line || line.startsWith("#")) continue;
+    if (!line.startsWith(key + "=")) continue;
+    return line.slice((key + "=").length).trim();
+  }
+  return null;
+}
+
 function tokenEnvForProjectId(id: string) {
   return `MCP_${id.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_BEARER_TOKEN`;
 }
@@ -82,6 +93,13 @@ function readHostPortFromCompose(projectId: string) {
   const m = raw.match(/127\\.0\\.0\\.1:(19\\d{3}):8080/);
   if (!m) throw new Error(`cannot find host port mapping in ${composeFile}`);
   return Number(m[1]);
+}
+
+function projectFiles(projectId: string) {
+  return {
+    project: `${env.MCP_REPO_DIR}/deploy/projects/${projectId}.yml`,
+    compose: `${env.MCP_REPO_DIR}/deploy/docker-compose.nginx.${projectId}.yml`,
+  };
 }
 
 function ensureMcpNginxRoute(mcpPath: string, hostPort: number) {
@@ -132,23 +150,28 @@ app.post("/deploy", async (req, reply) => {
   const mcpPath = body.mcpPath?.trim() || `/p/${id}/mcp`;
 
   const tokenEnv = tokenEnvForProjectId(id);
-  const token = randToken();
+  const files = projectFiles(id);
 
   // Pull latest mcp-service repo (host).
   host("git pull --ff-only");
 
-  // Generate project files via mcp-service init. We do not auto-patch nginx template in repo.
-  // Nginx routing on VM is handled separately by manual template sync today.
-  // Generate project files via mcp-service init (host).
-  // Node/npm/tsc must exist on the host in this MVP flow.
-  host(
-    `npm install --silent >/dev/null 2>&1 || true; ` +
-      `npm run build >/dev/null 2>&1; ` +
-      `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
-  );
+  // Generate project files via mcp-service init only if missing (idempotent deploy).
+  if (!fs.existsSync(files.project) || !fs.existsSync(files.compose)) {
+    host(
+      `npm install --silent >/dev/null 2>&1 || true; ` +
+        `npm run build >/dev/null 2>&1; ` +
+        `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
+    );
+  }
+  if (!fs.existsSync(files.project) || !fs.existsSync(files.compose)) {
+    throw new Error("init did not produce expected files");
+  }
 
   // Ensure token in deploy/.env
-  ensureEnvLine(env.MCP_ENV_FILE, tokenEnv, token);
+  const existingToken = readEnvValue(env.MCP_ENV_FILE, tokenEnv);
+  const token = existingToken || randToken();
+  const tokenCreated = !existingToken;
+  if (tokenCreated) ensureEnvLine(env.MCP_ENV_FILE, tokenEnv, token);
 
   // Bring up compose for project.
   asRoot(`cd ${env.MCP_REPO_DIR} && docker compose -f deploy/docker-compose.nginx.${id}.yml up -d --build`);
@@ -167,7 +190,7 @@ app.post("/deploy", async (req, reply) => {
     mcpPath,
     hostPort,
     tokenEnv,
-    token,
+    token: tokenCreated ? token : null,
     nginxChanged,
   };
 });
