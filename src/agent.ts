@@ -73,6 +73,12 @@ function host(cmd: string) {
   );
 }
 
+function hostGitSafe() {
+  // Git may refuse to work if repo ownership differs (common on servers).
+  // Make it explicit for the ephemeral container.
+  host(`git config --global --add safe.directory ${env.MCP_REPO_DIR} >/dev/null 2>&1 || true`);
+}
+
 app.get("/health", async () => ({ ok: true }));
 
 app.post("/deploy", async (req, reply) => {
@@ -97,7 +103,9 @@ app.post("/deploy", async (req, reply) => {
   const token = randToken();
 
   // Pull latest mcp-service repo (host).
-  host("apk add --no-cache git >/dev/null 2>&1; git pull --ff-only");
+  host("apk add --no-cache git >/dev/null 2>&1");
+  hostGitSafe();
+  host("git pull --ff-only");
 
   // Generate project files via mcp-service init. We do not auto-patch nginx template in repo.
   // Nginx routing on VM is handled separately by manual template sync today.
@@ -105,6 +113,7 @@ app.post("/deploy", async (req, reply) => {
   // Node/npm/tsc must exist on the host in this MVP flow.
   host(
     `apk add --no-cache git >/dev/null 2>&1; ` +
+      `git config --global --add safe.directory ${env.MCP_REPO_DIR} >/dev/null 2>&1 || true; ` +
       `npm install --silent >/dev/null 2>&1 || true; ` +
       `npm run build >/dev/null 2>&1; ` +
       `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
