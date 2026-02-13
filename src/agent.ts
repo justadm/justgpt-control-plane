@@ -65,11 +65,11 @@ function asRoot(cmd: string) {
 }
 
 function host(cmd: string) {
-  // Execute on host via an ephemeral alpine container (no need for git/npm inside agent image).
-  // env.MCP_REPO_DIR is bind-mounted into the agent container, so it is accessible here too.
+  // Execute on host via an ephemeral node container.
+  // We need git + node + npm to run mcp-service init/build; node image includes them.
   const q = cmd.replaceAll("'", "'\"'\"'");
   return sh(
-    `docker run --rm -v ${env.MCP_REPO_DIR}:${env.MCP_REPO_DIR} -w ${env.MCP_REPO_DIR} alpine:3.20 sh -lc '${q}'`,
+    `docker run --rm -v ${env.MCP_REPO_DIR}:${env.MCP_REPO_DIR} -w ${env.MCP_REPO_DIR} node:22-alpine sh -lc '${q}'`,
   );
 }
 
@@ -97,14 +97,15 @@ app.post("/deploy", async (req, reply) => {
   const token = randToken();
 
   // Pull latest mcp-service repo (host).
-  host("git pull --ff-only");
+  host("apk add --no-cache git >/dev/null 2>&1; git pull --ff-only");
 
   // Generate project files via mcp-service init. We do not auto-patch nginx template in repo.
   // Nginx routing on VM is handled separately by manual template sync today.
   // Generate project files via mcp-service init (host).
   // Node/npm/tsc must exist on the host in this MVP flow.
   host(
-    `npm install --silent >/dev/null 2>&1 || true; ` +
+    `apk add --no-cache git >/dev/null 2>&1; ` +
+      `npm install --silent >/dev/null 2>&1 || true; ` +
       `npm run build >/dev/null 2>&1; ` +
       `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
   );
