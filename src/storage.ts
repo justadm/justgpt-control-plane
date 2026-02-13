@@ -11,6 +11,8 @@ export type Project = {
   tokenEnv: string;
   status: "draft" | "deployed";
   lastDeployAt: string | null;
+  hostPort: number | null;
+  nginxChanged: boolean | null;
 };
 
 export type Db = {
@@ -48,7 +50,10 @@ export function saveDb(filePath: string, db: Db) {
   fs.renameSync(tmp, abs);
 }
 
-export function upsertProject(filePath: string, p: Omit<Project, "createdAt" | "status" | "lastDeployAt">) {
+export function upsertProject(
+  filePath: string,
+  p: Omit<Project, "createdAt" | "status" | "lastDeployAt" | "hostPort" | "nginxChanged">,
+) {
   const db = loadDb(filePath);
   const existing = db.projects.find((x) => x.id === p.id);
   if (existing) {
@@ -64,18 +69,26 @@ export function upsertProject(filePath: string, p: Omit<Project, "createdAt" | "
     createdAt: nowIso(),
     status: "draft",
     lastDeployAt: null,
+    hostPort: null,
+    nginxChanged: null,
   };
   db.projects.push(created);
   saveDb(filePath, db);
   return created;
 }
 
-export function markDeployed(filePath: string, id: string) {
+export function markDeployed(
+  filePath: string,
+  id: string,
+  info?: { hostPort?: number | null; nginxChanged?: boolean | null },
+) {
   const db = loadDb(filePath);
   const p = db.projects.find((x) => x.id === id);
   if (!p) return null;
   p.status = "deployed";
   p.lastDeployAt = nowIso();
+  if (typeof info?.hostPort === "number") p.hostPort = info.hostPort;
+  if (typeof info?.nginxChanged === "boolean") p.nginxChanged = info.nginxChanged;
   saveDb(filePath, db);
   return p;
 }

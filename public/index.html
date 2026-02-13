@@ -87,6 +87,8 @@
           const deployBtn = p.status === 'deployed'
             ? '<button disabled style="opacity:0.5; cursor: default;">Deployed</button>'
             : `<button data-deploy="${esc(p.id)}">Deploy</button>`;
+          const endpoint = p.endpoint || '';
+          const hostPort = (p.hostPort != null) ? String(p.hostPort) : '';
           return `
             <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.08)">
               <div class="row">
@@ -95,6 +97,9 @@
               </div>
               <div style="color: var(--muted); font-size: 12px; margin-top: 6px;">
                 path: <code>${esc(p.mcpPath)}</code> | tokenEnv: <code>${esc(p.tokenEnv)}</code>
+              </div>
+              <div style="color: var(--muted); font-size: 12px; margin-top: 6px;">
+                endpoint: <a href="${esc(endpoint)}" target="_blank" rel="noreferrer"><code>${esc(endpoint)}</code></a>${hostPort ? ` | hostPort: <code>${esc(hostPort)}</code>` : ''}
               </div>
               <div style="margin-top:10px;">
                 ${deployBtn}
@@ -108,12 +113,21 @@
             const id = btn.getAttribute('data-deploy');
             const out = document.getElementById('out');
             out.textContent = 'deploy...';
+            btn.disabled = true;
+            btn.style.opacity = '0.7';
             try {
-              const res = await j(`/api/projects/${id}/deploy`, { method: 'POST' });
+              const res = await j(`/api/projects/${id}/deploy`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: '{}',
+              });
               out.textContent = JSON.stringify(res, null, 2);
               await refresh();
             } catch (e) {
               out.textContent = String(e);
+            } finally {
+              btn.disabled = false;
+              btn.style.opacity = '1';
             }
           });
         }

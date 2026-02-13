@@ -18,6 +18,19 @@ const env = Env.parse(process.env);
 
 const app = Fastify({ logger: true });
 
+// Fastify по умолчанию кидает FST_ERR_CTP_EMPTY_JSON_BODY если content-type=application/json и body пустое.
+// Для MVP удобнее принимать пустое тело как {} (это безопасно для наших эндпоинтов).
+app.addContentTypeParser(/^application\/json(;.*)?$/, { parseAs: "string" }, (_req, body, done) => {
+  const s = String(body ?? "").trim();
+  if (!s) return done(null, {});
+  try {
+    return done(null, JSON.parse(s));
+  } catch (e: any) {
+    e.statusCode = 400;
+    return done(e, undefined as any);
+  }
+});
+
 app.register(fastifyStatic, {
   root: path.join(process.cwd(), "public"),
   prefix: "/",
@@ -27,7 +40,12 @@ app.get("/health", async () => ({ ok: true }));
 
 app.get("/api/projects", async () => {
   const db = loadDb(env.DATA_FILE);
-  return { projects: db.projects };
+  return {
+    projects: db.projects.map((p) => ({
+      ...p,
+      endpoint: `${env.MCP_BASE_URL}${p.mcpPath}`,
+    })),
+  };
 });
 
 app.post("/api/projects", async (req, reply) => {
@@ -101,12 +119,15 @@ app.post("/api/projects/:id/deploy", async (req, reply) => {
     return { error: "deploy failed", agent: data };
   }
 
-  const p = markDeployed(env.DATA_FILE, id);
+  // Сохраняем только несекретные части результата деплоя.
+  const p = markDeployed(env.DATA_FILE, id, {
+    hostPort: typeof data?.hostPort === "number" ? data.hostPort : null,
+    nginxChanged: typeof data?.nginxChanged === "boolean" ? data.nginxChanged : null,
+  });
   if (!p) {
     reply.code(404);
     return { error: "project not found" };
   }
-
   return { ok: true, project: p, agent: data };
 });
 
