@@ -23,7 +23,7 @@ services:
     environment:
       PORT: 19101
       HOST: 0.0.0.0
-      # TOKEN: set on VM via env file / runtime override (required)
+      TOKEN: ${AGENT_TOKEN}
       MCP_REPO_DIR: /opt/justgpt-mcp-service
       NGINX_SITE: /etc/nginx/sites-available/justgpt.ru.https
       MCP_ENV_FILE: /opt/justgpt-mcp-service/deploy/.env
