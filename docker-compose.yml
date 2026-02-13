@@ -19,6 +19,7 @@ services:
   deploy_agent:
     build: .
     command: ["node", "dist/agent.js"]
+    pid: host
     environment:
       PORT: 19101
       HOST: 0.0.0.0
@@ -29,6 +30,8 @@ services:
     volumes:
       - /opt/justgpt-mcp-service:/opt/justgpt-mcp-service
       - /etc/nginx:/etc/nginx
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /run:/run
       - /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
       - "host.docker.internal:host-gateway"

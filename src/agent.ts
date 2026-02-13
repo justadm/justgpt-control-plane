@@ -68,15 +68,47 @@ function host(cmd: string) {
   // Execute on host via an ephemeral node container.
   // We need git + node + npm to run mcp-service init/build; node image includes them.
   const q = cmd.replaceAll("'", "'\"'\"'");
+  const prelude =
+    `apk add --no-cache git >/dev/null 2>&1 || true; ` +
+    `git config --global --add safe.directory ${env.MCP_REPO_DIR} >/dev/null 2>&1 || true; `;
   return sh(
-    `docker run --rm -v ${env.MCP_REPO_DIR}:${env.MCP_REPO_DIR} -w ${env.MCP_REPO_DIR} node:22-alpine sh -lc '${q}'`,
+    `docker run --rm -v ${env.MCP_REPO_DIR}:${env.MCP_REPO_DIR} -w ${env.MCP_REPO_DIR} node:22-alpine sh -lc '${prelude}${q}'`,
   );
 }
 
-function hostGitSafe() {
-  // Git may refuse to work if repo ownership differs (common on servers).
-  // Make it explicit for the ephemeral container.
-  host(`git config --global --add safe.directory ${env.MCP_REPO_DIR} >/dev/null 2>&1 || true`);
+function readHostPortFromCompose(projectId: string) {
+  const composeFile = `${env.MCP_REPO_DIR}/deploy/docker-compose.nginx.${projectId}.yml`;
+  const raw = fs.readFileSync(composeFile, "utf8");
+  const m = raw.match(/127\\.0\\.0\\.1:(19\\d{3}):8080/);
+  if (!m) throw new Error(`cannot find host port mapping in ${composeFile}`);
+  return Number(m[1]);
+}
+
+function ensureMcpNginxRoute(mcpPath: string, hostPort: number) {
+  const raw = fs.readFileSync(env.NGINX_SITE, "utf8");
+  const locLine = `    location = ${mcpPath} {`;
+  if (raw.includes(locLine)) return false;
+
+  const mcpNeedle = "\n    server_name mcp.justgpt.ru;\n";
+  const mcpPos = raw.indexOf(mcpNeedle);
+  if (mcpPos < 0) throw new Error("mcp server block not found in nginx site");
+
+  const insertionNeedle = "\n    location / {\n        return 404;\n    }\n";
+  const insPos = raw.indexOf(insertionNeedle, mcpPos);
+  if (insPos < 0) throw new Error("cannot find insertion point in mcp server block");
+
+  const block =
+    `\n    location = ${mcpPath} {\n` +
+    `        proxy_pass http://127.0.0.1:${hostPort};\n` +
+    `        proxy_set_header Host $host;\n` +
+    `        proxy_set_header X-Forwarded-Proto $scheme;\n` +
+    `        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n` +
+    `        proxy_set_header Connection \"\";\n` +
+    `    }\n`;
+
+  const out = raw.slice(0, insPos) + block + raw.slice(insPos);
+  fs.writeFileSync(env.NGINX_SITE, out);
+  return true;
 }
 
 app.get("/health", async () => ({ ok: true }));
@@ -103,8 +135,6 @@ app.post("/deploy", async (req, reply) => {
   const token = randToken();
 
   // Pull latest mcp-service repo (host).
-  host("apk add --no-cache git >/dev/null 2>&1");
-  hostGitSafe();
   host("git pull --ff-only");
 
   // Generate project files via mcp-service init. We do not auto-patch nginx template in repo.
@@ -112,9 +142,7 @@ app.post("/deploy", async (req, reply) => {
   // Generate project files via mcp-service init (host).
   // Node/npm/tsc must exist on the host in this MVP flow.
   host(
-    `apk add --no-cache git >/dev/null 2>&1; ` +
-      `git config --global --add safe.directory ${env.MCP_REPO_DIR} >/dev/null 2>&1 || true; ` +
-      `npm install --silent >/dev/null 2>&1 || true; ` +
+    `npm install --silent >/dev/null 2>&1 || true; ` +
       `npm run build >/dev/null 2>&1; ` +
       `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
   );
@@ -125,14 +153,22 @@ app.post("/deploy", async (req, reply) => {
   // Bring up compose for project.
   asRoot(`cd ${env.MCP_REPO_DIR} && docker compose -f deploy/docker-compose.nginx.${id}.yml up -d --build`);
 
+  const hostPort = readHostPortFromCompose(id);
+  const nginxChanged = ensureMcpNginxRoute(mcpPath, hostPort);
+  if (nginxChanged) {
+    // Validate + reload nginx on host (container must run with pid: host and /run mounted).
+    asRoot("nginx -t");
+    asRoot("nginx -s reload");
+  }
+
   return {
     ok: true,
     id,
     mcpPath,
+    hostPort,
     tokenEnv,
     token,
-    note:
-      "Nginx route still requires adding location block for the new path on VM (automate next).",
+    nginxChanged,
   };
 });
 
