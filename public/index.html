@@ -88,6 +88,20 @@
         return data;
       }
 
+      function redactSecrets(obj) {
+        // agent.token показываем только в "Project token" и больше нигде (скриншоты/логирование).
+        try {
+          if (!obj || typeof obj !== 'object') return obj;
+          const copy = JSON.parse(JSON.stringify(obj));
+          if (copy.agent && typeof copy.agent === 'object' && 'token' in copy.agent) {
+            copy.agent.token = copy.agent.token ? '[REDACTED]' : copy.agent.token;
+          }
+          return copy;
+        } catch {
+          return obj;
+        }
+      }
+
       function showTokenOnce(res) {
         const token = res && res.agent && res.agent.token;
         const tokenEnv = res && res.agent && res.agent.tokenEnv;
@@ -160,7 +174,7 @@
                 headers: { 'content-type': 'application/json' },
                 body: '{}',
               });
-              out.textContent = JSON.stringify(res, null, 2);
+              out.textContent = JSON.stringify(redactSecrets(res), null, 2);
               showTokenOnce(res);
               await refresh();
             } catch (e) {
@@ -209,7 +223,7 @@
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ id, type, mcpPath: mcpPath || undefined })
           });
-          out.textContent = JSON.stringify(res, null, 2);
+          out.textContent = JSON.stringify(redactSecrets(res), null, 2);
           await refresh();
         } catch (e) {
           out.textContent = String(e);
