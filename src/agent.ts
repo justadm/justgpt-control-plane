@@ -57,6 +57,12 @@ function randToken() {
   return sh("node -e 'console.log(require(\"crypto\").randomBytes(32).toString(\"base64url\"))'").trim();
 }
 
+function asRoot(cmd: string) {
+  // This container is expected to run as root on the VM (it mounts docker.sock and /etc/nginx).
+  // Avoid depending on sudo inside the container.
+  return sh(cmd);
+}
+
 app.get("/health", async () => ({ ok: true }));
 
 app.post("/deploy", async (req, reply) => {
@@ -81,20 +87,20 @@ app.post("/deploy", async (req, reply) => {
   const token = randToken();
 
   // Pull latest mcp-service repo.
-  sh(`cd ${env.MCP_REPO_DIR} && sudo -n git pull --ff-only`);
+  asRoot(`cd ${env.MCP_REPO_DIR} && git pull --ff-only`);
 
   // Generate project files via mcp-service init. We do not auto-patch nginx template in repo.
   // Nginx routing on VM is handled separately by manual template sync today.
   sh(
-    `cd ${env.MCP_REPO_DIR} && sudo -n npm install --silent >/dev/null 2>&1 || true; sudo -n npm run build >/dev/null 2>&1; ` +
-      `sudo -n node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
+    `cd ${env.MCP_REPO_DIR} && npm install --silent >/dev/null 2>&1 || true; npm run build >/dev/null 2>&1; ` +
+      `node dist/cli.js init --id ${id} --type ${body.type} --path ${mcpPath} --no-update-env-example --no-update-nginx`,
   );
 
   // Ensure token in deploy/.env
   ensureEnvLine(env.MCP_ENV_FILE, tokenEnv, token);
 
   // Bring up compose for project.
-  sh(`cd ${env.MCP_REPO_DIR} && sudo -n docker compose -f deploy/docker-compose.nginx.${id}.yml up -d --build`);
+  asRoot(`cd ${env.MCP_REPO_DIR} && docker compose -f deploy/docker-compose.nginx.${id}.yml up -d --build`);
 
   return {
     ok: true,
